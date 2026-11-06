@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rounded-square icon for Android 7.x launchers (no adaptive icons before API 26). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M26,6 L82,6 Q102,6 102,26 L102,82 Q102,102 82,102 L26,102 Q6,102 6,82 L6,26 Q6,6 26,6 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="6" android:startY="6"
+                android:endX="102" android:endY="102"
+                android:startColor="#FF14A39A"
+                android:endColor="#FF00534E" />
+        </aapt:attr>
+    </path>
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="1.3" android:scaleY="1.3">
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M30,41 L30,35 Q30,30 35,30 L41,30 M67,30 L73,30 Q78,30 78,35 L78,41 M78,67 L78,73 Q78,78 73,78 L67,78 M41,78 L35,78 Q30,78 30,73 L30,67" />
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M44,37 L59,37 L67,45 L67,68 Q67,71 64,71 L44,71 Q41,71 41,68 L41,40 Q41,37 44,37 Z" />
+        <path android:fillColor="#FFB2E6E1" android:pathData="M59,37 L59,43 Q59,45 61,45 L67,45 Z" />
+        <path android:strokeColor="#FF0E7C75" android:strokeWidth="2.5" android:strokeLineCap="round"
+            android:pathData="M46,50 L58,50 M46,57 L62,57 M46,64 L56,64" />
+        <path android:strokeColor="#FFFFC94A" android:strokeWidth="3.5" android:strokeLineCap="round"
+            android:pathData="M26,54 L82,54" />
+    </group>
+</vector>

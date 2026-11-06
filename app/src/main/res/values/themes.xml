@@ -1,0 +1,4 @@
+<resources>
+    <!-- Window theme only; the UI itself is styled by Material 3 in Compose. -->
+    <style name="Theme.Smartskan" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
