@@ -1,6 +1,7 @@
 package com.example.smartskan.util
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
@@ -20,6 +21,11 @@ object Ocr {
         val image = withContext(Dispatchers.IO) { InputImage.fromFilePath(context, uri) }
         return recognizer.process(image).await()
     }
+
+    /** Text of a rendered page: one paragraph per recognised block, separated by blank lines. */
+    suspend fun readBitmap(bitmap: Bitmap): String =
+        recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+            .textBlocks.joinToString("\n\n") { block -> block.lines.joinToString("\n") { it.text } }
 
     /** Plain text of every image, separated by blank lines. */
     suspend fun readText(context: Context, uris: List<Uri>): String =

@@ -2,6 +2,7 @@ package com.example.smartskan.data
 
 import android.content.Context
 import android.net.Uri
+import com.example.smartskan.pdf.PdfTools
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,9 +14,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.UUID
 
 class Repository(private val context: Context) {
@@ -33,31 +31,44 @@ class Repository(private val context: Context) {
     fun pdfFile(doc: ScannedDoc) = File(docsDir, "${doc.id}.pdf")
     fun thumbnailFile(doc: ScannedDoc) = File(thumbsDir, "${doc.id}.jpg")
 
-    suspend fun importScan(pdfUri: Uri, pageCount: Int, firstPageImage: Uri?): ScannedDoc = withContext(Dispatchers.IO) {
-        val stamp = SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.getDefault()).format(Date())
-        val doc = ScannedDoc(UUID.randomUUID().toString(), "Scan $stamp", pageCount, System.currentTimeMillis())
-        copy(pdfUri, pdfFile(doc))
-        firstPageImage?.let { runCatching { copy(it, thumbnailFile(doc)) } }
+    suspend fun importScan(name: String, pdfUri: Uri, pageCount: Int, firstPageImage: Uri?): ScannedDoc =
+        createDocument(name) { pdf, thumbnail ->
+            copy(pdfUri, pdf)
+            firstPageImage?.let { runCatching { copy(it, thumbnail) } }
+            pageCount
+        }
+
+    /** Creates a new document. [write] fills in the PDF and thumbnail files and returns the page count. */
+    suspend fun createDocument(
+        name: String,
+        isBooklet: Boolean = false,
+        write: suspend (pdf: File, thumbnail: File) -> Int,
+    ): ScannedDoc = withContext(Dispatchers.IO) {
+        val id = UUID.randomUUID().toString()
+        val draft = ScannedDoc(id, name, 0, System.currentTimeMillis(), isBooklet)
+        val pages = try {
+            write(pdfFile(draft), thumbnailFile(draft))
+        } catch (e: Exception) {
+            pdfFile(draft).delete()
+            thumbnailFile(draft).delete()
+            throw e
+        }
+        val doc = draft.copy(pageCount = pages)
         documents.update { listOf(doc) + it }
         doc
     }
 
-    /** Creates a new document; [write] fills in the PDF and thumbnail files. */
-    suspend fun addDocument(
-        name: String,
-        pageCount: Int,
-        write: suspend (pdf: File, thumbnail: File) -> Unit,
-    ): ScannedDoc = withContext(Dispatchers.IO) {
-        val doc = ScannedDoc(UUID.randomUUID().toString(), name, pageCount, System.currentTimeMillis())
-        try {
-            write(pdfFile(doc), thumbnailFile(doc))
-        } catch (e: Exception) {
-            pdfFile(doc).delete()
-            thumbnailFile(doc).delete()
-            throw e
-        }
-        documents.update { listOf(doc) + it }
-        doc
+    /** Copies a PDF from anywhere on the device into the app's documents. */
+    suspend fun importPdf(uri: Uri, name: String): ScannedDoc = createDocument(name) { pdf, thumbnail ->
+        copy(uri, pdf)
+        PdfTools.writeThumbnail(pdf, thumbnail)
+        PdfTools.pageCount(pdf)
+    }
+
+    /** Scratch folder for tool output (e.g. Word exports) that can be shared via the FileProvider. */
+    fun exportFile(fileName: String): File {
+        val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+        return File(dir, safeFileName(fileName))
     }
 
     fun renameDocument(doc: ScannedDoc, name: String) {
@@ -76,8 +87,7 @@ class Repository(private val context: Context) {
     suspend fun exportForShare(doc: ScannedDoc): File = withContext(Dispatchers.IO) {
         shareDir.mkdirs()
         shareDir.listFiles()?.forEach { it.delete() }
-        val safeName = doc.name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "scan" }
-        File(shareDir, "$safeName.pdf").also { pdfFile(doc).copyTo(it, overwrite = true) }
+        File(shareDir, "${safeFileName(doc.name)}.pdf").also { pdfFile(doc).copyTo(it, overwrite = true) }
     }
 
     // ---- Signature ----
@@ -93,6 +103,28 @@ class Repository(private val context: Context) {
         scope.launch { signatureFile.writeText(signature.toJson().toString()) }
     }
 
+    fun clearSignature() {
+        _signature.value = null
+        scope.launch { signatureFile.delete() }
+    }
+
+    // ---- Storage ----
+
+    /** Bytes used by saved documents and their thumbnails. */
+    suspend fun documentStorageBytes(): Long = withContext(Dispatchers.IO) {
+        listOf(docsDir, thumbsDir).sumOf { dir -> dir.walk().filter { it.isFile }.sumOf { it.length() } }
+    }
+
+    /** Bytes held in the cache (shared copies, exports, temporary files). */
+    suspend fun cacheBytes(): Long = withContext(Dispatchers.IO) {
+        context.cacheDir.walk().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    /** Deletes temporary files (shared copies, exports). Saved documents are untouched. */
+    suspend fun clearCache() = withContext(Dispatchers.IO) {
+        context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
     // ---- Codes ----
 
     fun addCode(code: ScannedCode) = codes.update { listOf(code) + it }
@@ -106,6 +138,8 @@ class Repository(private val context: Context) {
     }
 
     fun deleteExpense(id: String) = expenses.update { list -> list.filterNot { it.id == id } }
+
+    private fun safeFileName(name: String) = name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "scan" }
 
     private fun copy(uri: Uri, dest: File) {
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Cannot read $uri")

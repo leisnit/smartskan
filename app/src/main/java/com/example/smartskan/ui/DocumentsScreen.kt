@@ -1,12 +1,13 @@
 package com.example.smartskan.ui
 
+import androidx.compose.ui.res.stringResource
+import com.example.smartskan.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -14,24 +15,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Gesture
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,121 +44,137 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.smartskan.data.Repository
 import com.example.smartskan.data.ScannedDoc
+import com.example.smartskan.util.pagesLabel
+import com.example.smartskan.util.timestampName
 import com.example.smartskan.util.formatDateTime
 import kotlinx.coroutines.launch
 
+/** The Documents tab: every saved document. New scans come from the + button in the bottom bar. */
 @Composable
 fun DocumentsScreen(repo: Repository) {
+    val docs by repo.documents.items.collectAsState()
+    val actions = rememberDocumentActions()
+
+    ScreenScaffold(title = stringResource(R.string.tab_documents)) { padding ->
+        if (docs.isEmpty()) {
+            EmptyState(
+                Icons.Outlined.Description,
+                stringResource(R.string.no_documents),
+                stringResource(R.string.no_documents_body),
+                Modifier.padding(padding),
+            )
+        } else {
+            LazyColumn(contentPadding = listPadding(padding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(docs, key = { it.id }) { doc -> DocumentRow(doc, repo, actions) }
+            }
+        }
+    }
+    DocumentActionDialogs(actions, repo)
+}
+
+// ---------- Smart scan (the + button in the bottom bar) ----------
+
+@Stable
+class SmartScan(val launch: () -> Unit, private val savingState: () -> Boolean) {
+    val saving get() = savingState()
+}
+
+/** Opens the document scanner and saves the result as a PDF in Documents. */
+@Composable
+fun rememberSmartScan(repo: Repository): SmartScan {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val docs by repo.documents.items.collectAsState()
     var saving by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf<ScannedDoc?>(null) }
-    var deleting by remember { mutableStateOf<ScannedDoc?>(null) }
-    var annotating by remember { mutableStateOf<ScannedDoc?>(null) }
-
-    val scan = rememberDocumentScanner(includePdf = true) { result ->
+    val launch = rememberDocumentScanner(includePdf = true) { result ->
         val pdf = result.pdf ?: return@rememberDocumentScanner
         saving = true
         scope.launch {
             try {
-                repo.importScan(pdf.uri, pdf.pageCount, result.pages?.firstOrNull()?.imageUri)
-                toast(context, "Saved ${pdf.pageCount} page(s) as PDF")
+                val name = timestampName(context.getString(R.string.name_scan))
+                repo.importScan(name, pdf.uri, pdf.pageCount, result.pages?.firstOrNull()?.imageUri)
+                toast(context, context.getString(R.string.saved_pages_pdf, pagesLabel(context, pdf.pageCount)))
             } catch (e: Exception) {
-                toast(context, "Could not save scan: ${e.localizedMessage}")
+                toast(context, context.getString(R.string.save_scan_failed, e.localizedMessage))
             } finally {
                 saving = false
             }
         }
     }
+    return remember(launch) { SmartScan(launch) { saving } }
+}
 
-    ScreenScaffold(
-        title = "Documents",
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = scan,
-                icon = { Icon(Icons.Filled.DocumentScanner, null) },
-                text = { Text("Scan") },
-            )
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize()) {
-            if (docs.isEmpty()) {
-                EmptyState(
-                    Icons.Outlined.Description,
-                    "No documents yet",
-                    "Tap Scan to photograph a document. Edges are detected automatically, and you can crop, " +
-                        "rotate and apply filters before saving it as a PDF.",
-                    Modifier.padding(padding),
-                )
-            } else {
-                LazyColumn(contentPadding = listPadding(padding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(docs, key = { it.id }) { doc ->
-                        DocumentRow(
-                            doc = doc,
-                            repo = repo,
-                            onOpen = { openFile(context, repo.pdfFile(doc), "application/pdf") },
-                            onShare = { scope.launch { shareFile(context, repo.exportForShare(doc), "application/pdf") } },
-                            onAnnotate = { annotating = doc },
-                            onRename = { renaming = doc },
-                            onDelete = { deleting = doc },
-                        )
-                    }
-                }
-            }
-            if (saving) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = padding.calculateTopPadding()))
-        }
-    }
+// ---------- Document rows and their actions ----------
 
-    renaming?.let { doc ->
-        TextInputDialog("Rename document", doc.name, "Rename", { repo.renameDocument(doc, it) }, { renaming = null })
+/** Which document dialog (rename / delete / sign & annotate) is open. */
+@Stable
+class DocumentActions {
+    var renaming by mutableStateOf<ScannedDoc?>(null)
+    var deleting by mutableStateOf<ScannedDoc?>(null)
+    var annotating by mutableStateOf<ScannedDoc?>(null)
+    var reading by mutableStateOf<ScannedDoc?>(null)
+}
+
+@Composable
+fun rememberDocumentActions() = remember { DocumentActions() }
+
+@Composable
+fun DocumentActionDialogs(actions: DocumentActions, repo: Repository) {
+    actions.renaming?.let { doc ->
+        TextInputDialog(stringResource(R.string.rename_document), doc.name, stringResource(R.string.action_rename), { repo.renameDocument(doc, it) }, { actions.renaming = null })
     }
-    annotating?.let { doc ->
-        PdfEditorDialog(doc, repo, onDismiss = { annotating = null })
+    actions.annotating?.let { doc ->
+        PdfEditorDialog(doc, repo, onDismiss = { actions.annotating = null })
     }
-    deleting?.let { doc ->
-        ConfirmDialog("Delete document?", "\"${doc.name}\" will be permanently deleted.", "Delete",
-            { repo.deleteDocument(doc) }, { deleting = null })
+    actions.reading?.let { doc ->
+        BookReaderDialog(doc, repo, onDismiss = { actions.reading = null })
+    }
+    actions.deleting?.let { doc ->
+        ConfirmDialog(stringResource(R.string.delete_document_title), stringResource(R.string.delete_document_body, doc.name), stringResource(R.string.action_delete),
+            { repo.deleteDocument(doc) }, { actions.deleting = null })
     }
 }
 
 @Composable
-private fun DocumentRow(
-    doc: ScannedDoc,
-    repo: Repository,
-    onOpen: () -> Unit,
-    onShare: () -> Unit,
-    onAnnotate: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-) {
+fun DocumentRow(doc: ScannedDoc, repo: Repository, actions: DocumentActions, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+    val openExternally = { openFile(context, repo.pdfFile(doc), "application/pdf") }
+    Card(
+        modifier.fillMaxWidth().clickable {
+            if (doc.isBooklet) actions.reading = doc else openExternally()
+        },
+    ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             FileThumbnail(repo.thumbnailFile(doc), Modifier.size(width = 56.dp, height = 72.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(doc.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${doc.pageCount} page${if (doc.pageCount == 1) "" else "s"} · ${formatDateTime(doc.createdAt)}",
+                    (if (doc.isBooklet) "${stringResource(R.string.booklet_label)} · " else "") +
+                        "${pagesLabel(context, doc.pageCount)} · ${formatDateTime(doc.createdAt)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onAnnotate) { Icon(Icons.Outlined.Gesture, "Sign & annotate") }
+            IconButton(onClick = { actions.annotating = doc }) { Icon(Icons.Outlined.Gesture, stringResource(R.string.sign_annotate)) }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.action_more)) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, null) },
-                        onClick = { menu = false; onOpen() })
-                    DropdownMenuItem(text = { Text("Sign & annotate") }, leadingIcon = { Icon(Icons.Outlined.Gesture, null) },
-                        onClick = { menu = false; onAnnotate() })
-                    DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
-                        onClick = { menu = false; onShare() })
-                    DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) },
-                        onClick = { menu = false; onRename() })
-                    DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
-                        onClick = { menu = false; onDelete() })
+                    // Tapping the row opens the document and the pen button signs it, so neither is repeated here.
+                    if (doc.isBooklet) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.open_in_pdf_app)) }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, null) },
+                            onClick = { menu = false; openExternally() })
+                    }
+                    DropdownMenuItem(text = { Text(stringResource(R.string.action_share)) }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
+                        onClick = {
+                            menu = false
+                            scope.launch { shareFile(context, repo.exportForShare(doc), "application/pdf") }
+                        })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.action_rename)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                        onClick = { menu = false; actions.renaming = doc })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.action_delete)) }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
+                        onClick = { menu = false; actions.deleting = doc })
                 }
             }
         }

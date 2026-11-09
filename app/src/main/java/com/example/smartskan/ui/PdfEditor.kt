@@ -1,5 +1,8 @@
 package com.example.smartskan.ui
 
+import androidx.compose.ui.res.stringResource
+import com.example.smartskan.R
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -47,8 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -97,17 +98,15 @@ import com.example.smartskan.pdf.TextAnnotation
 import com.example.smartskan.pdf.isMovable
 import com.example.smartskan.pdf.moved
 import com.example.smartskan.pdf.resized
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private enum class Tool(val label: String, val icon: ImageVector) {
-    SELECT("Select", Icons.Outlined.TouchApp),
-    PEN("Pen", Icons.Outlined.Edit),
-    HIGHLIGHT("Highlight", Icons.Outlined.BorderColor),
-    TEXT("Text", Icons.Outlined.TextFields),
-    SIGN("Sign", Icons.Outlined.Gesture),
+private enum class Tool(@StringRes val label: Int, val icon: ImageVector) {
+    SELECT(R.string.editor_select, Icons.Outlined.TouchApp),
+    PEN(R.string.editor_pen, Icons.Outlined.Edit),
+    HIGHLIGHT(R.string.editor_highlight, Icons.Outlined.BorderColor),
+    TEXT(R.string.editor_text, Icons.Outlined.TextFields),
+    SIGN(R.string.editor_sign, Icons.Outlined.Gesture),
 }
 
 private val inkColors = listOf(0xFF111111, 0xFF1A49C9, 0xFFD32F2F, 0xFF2E7D32).map { it.toInt() }
@@ -168,18 +167,9 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val signature by repo.signature.collectAsState()
 
-    var pdf by remember { mutableStateOf<PdfPages?>(null) }
-    var loadError by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(doc.id) {
-        try {
-            pdf = PdfPages.open(repo.pdfFile(doc))
-        } catch (e: Exception) {
-            loadError = e.localizedMessage ?: "Could not open this PDF"
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose { pdf?.let { p -> CoroutineScope(Dispatchers.IO).launch { p.close() } } }
-    }
+    val opened = rememberOpenedPdf(repo.pdfFile(doc))
+    val pdf = opened.pages
+    val loadError = opened.error
 
     val state = remember { EditorState() }
     var tool by remember { mutableStateOf(Tool.PEN) }
@@ -240,14 +230,15 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
         saving = true
         scope.launch {
             try {
-                val suffix = if (state.hasSignature) "signed" else "annotated"
-                repo.addDocument("${doc.name} ($suffix)", p.sizes.size) { file, thumb ->
+                val name = context.getString(if (state.hasSignature) R.string.doc_signed else R.string.doc_annotated, doc.name)
+                repo.createDocument(name, doc.isBooklet) { file, thumb ->
                     p.exportAnnotated(state.all(p.sizes.size), file, thumb)
+                    p.sizes.size
                 }
-                toast(context, "Saved as a new document")
+                toast(context, context.getString(R.string.saved_new_doc))
                 onDismiss()
             } catch (e: Exception) {
-                toast(context, "Could not save: ${e.localizedMessage}")
+                toast(context, context.getString(R.string.save_failed, e.localizedMessage))
             } finally {
                 saving = false
             }
@@ -265,13 +256,13 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    navigationIcon = { IconButton(onClick = { requestClose() }) { Icon(Icons.Outlined.Close, "Close") } },
+                    navigationIcon = { IconButton(onClick = { requestClose() }) { Icon(Icons.Outlined.Close, stringResource(R.string.action_close)) } },
                     title = { Text(doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         IconButton(onClick = { state.undo()?.let { pageIndex = it } }, enabled = state.canUndo) {
-                            Icon(Icons.AutoMirrored.Outlined.Undo, "Undo")
+                            Icon(Icons.AutoMirrored.Outlined.Undo, stringResource(R.string.undo))
                         }
-                        TextButton(onClick = { save() }, enabled = state.hasChanges && !saving) { Text("Save") }
+                        TextButton(onClick = { save() }, enabled = state.hasChanges && !saving) { Text(stringResource(R.string.action_save)) }
                     },
                 )
             },
@@ -282,7 +273,7 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
                             selected = tool == t,
                             onClick = { selectTool(t) },
                             icon = { Icon(t.icon, null) },
-                            label = { Text(t.label) },
+                            label = { Text(stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
                     }
                 }
@@ -307,26 +298,23 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
                     val p = pdf
                     when {
-                        loadError != null -> Text(loadError!!, color = MaterialTheme.colorScheme.error)
+                        loadError != null -> Text(loadError, color = MaterialTheme.colorScheme.error)
                         p == null -> CircularProgressIndicator()
                         else -> {
-                            val pageWidth = p.sizes[pageIndex].width
+                            val highlighting = tool == Tool.HIGHLIGHT
+                            val strokeColor = if (highlighting) highlightColor else inkColor
+                            val strokeWidth = p.sizes[pageIndex].width * if (highlighting) 0.025f else 0.0045f
                             PageView(
                                 pages = p,
                                 index = pageIndex,
                                 state = state,
                                 tool = tool,
-                                inkColor = if (tool == Tool.HIGHLIGHT) highlightColor else inkColor,
-                                inkWidth = if (tool == Tool.HIGHLIGHT) pageWidth * 0.025f else pageWidth * 0.0045f,
+                                inkColor = strokeColor,
+                                inkWidth = strokeWidth,
                                 onInk = { points ->
                                     state.add(
                                         pageIndex,
-                                        InkAnnotation(
-                                            state.newId(), points,
-                                            if (tool == Tool.HIGHLIGHT) highlightColor else inkColor,
-                                            if (tool == Tool.HIGHLIGHT) pageWidth * 0.025f else pageWidth * 0.0045f,
-                                            highlighter = tool == Tool.HIGHLIGHT,
-                                        ),
+                                        InkAnnotation(state.newId(), points, strokeColor, strokeWidth, highlighter = highlighting),
                                     )
                                 },
                                 onTap = { at, hit -> onTap(at, hit) },
@@ -342,11 +330,11 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         IconButton(onClick = { pageIndex--; state.selectedId = null }, enabled = pageIndex > 0) {
-                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, "Previous page")
+                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, stringResource(R.string.prev_page))
                         }
-                        Text("Page ${pageIndex + 1} of $count", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.page_of, pageIndex + 1, count), style = MaterialTheme.typography.labelLarge)
                         IconButton(onClick = { pageIndex++; state.selectedId = null }, enabled = pageIndex < count - 1) {
-                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, "Next page")
+                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, stringResource(R.string.next_page))
                         }
                     }
                 }
@@ -355,9 +343,9 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
 
         textRequest?.let { req ->
             TextInputDialog(
-                title = if (req.editId == null) "Add text" else "Edit text",
+                title = stringResource(if (req.editId == null) R.string.add_text else R.string.edit_text),
                 initial = req.initial,
-                confirmLabel = if (req.editId == null) "Add" else "Save",
+                confirmLabel = stringResource(if (req.editId == null) R.string.action_add else R.string.action_save),
                 onConfirm = { text ->
                     if (req.editId != null) {
                         state.checkpoint(pageIndex)
@@ -386,7 +374,7 @@ fun PdfEditorDialog(doc: ScannedDoc, repo: Repository, onDismiss: () -> Unit) {
         }
         if (confirmDiscard) {
             ConfirmDialog(
-                "Discard changes?", "Your annotations haven't been saved.", "Discard",
+                stringResource(R.string.discard_title), stringResource(R.string.discard_body), stringResource(R.string.action_discard),
                 onConfirm = onDismiss, onDismiss = { confirmDiscard = false },
             )
         }
@@ -420,28 +408,28 @@ private fun ToolOptions(
                 inkColors.forEach { c -> ColorDot(c, c == inkColor) { onInkColor(c) } }
                 Spacer(Modifier.weight(1f))
                 when (tool) {
-                    Tool.TEXT -> hint("Tap to add text")
+                    Tool.TEXT -> hint(stringResource(R.string.tap_add_text))
                     Tool.SIGN -> TextButton(onClick = onRedrawSignature) {
-                        Text(if (hasSignature) "Redraw signature" else "Draw signature")
+                        Text(stringResource(if (hasSignature) R.string.redraw_signature else R.string.draw_signature))
                     }
-                    else -> hint("Draw with your finger")
+                    else -> hint(stringResource(R.string.draw_finger))
                 }
             }
             Tool.HIGHLIGHT -> {
                 highlightColors.forEach { c -> ColorDot(c or 0xFF000000.toInt(), c == highlightColor) { onHighlightColor(c) } }
                 Spacer(Modifier.weight(1f))
-                hint("Drag over text")
+                hint(stringResource(R.string.drag_over_text))
             }
             Tool.SELECT -> {
                 if (selected == null) {
-                    hint("Tap text or a signature to select it. Drag to move, drag the dot to resize.", Modifier.weight(1f))
+                    hint(stringResource(R.string.select_hint), Modifier.weight(1f))
                 } else {
-                    hint("Drag to move · dot to resize", Modifier.weight(1f))
+                    hint(stringResource(R.string.move_hint), Modifier.weight(1f))
                     if (selected is TextAnnotation) {
-                        TextButton(onClick = { onEditText(selected) }) { Text("Edit") }
+                        TextButton(onClick = { onEditText(selected) }) { Text(stringResource(R.string.action_edit)) }
                     }
                     IconButton(onClick = { onDelete(selected) }) {
-                        Icon(Icons.Outlined.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Outlined.Delete, stringResource(R.string.action_delete), tint = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -596,10 +584,10 @@ private fun SignaturePadDialog(onSave: (Signature) -> Unit, onDismiss: () -> Uni
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), tonalElevation = 6.dp) {
             Column(Modifier.padding(20.dp)) {
-                Text("Draw your signature", style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.sig_pad_title), style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "It's saved on this device so you can reuse it.",
+                    stringResource(R.string.sig_pad_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -613,7 +601,7 @@ private fun SignaturePadDialog(onSave: (Signature) -> Unit, onDismiss: () -> Uni
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
                 ) {
                     if (strokes.isEmpty() && live == null) {
-                        Text("Sign here", Modifier.align(Alignment.Center), color = Color(0xFF9E9E9E))
+                        Text(stringResource(R.string.sign_here), Modifier.align(Alignment.Center), color = Color(0xFF9E9E9E))
                     }
                     Canvas(
                         Modifier.fillMaxSize().pointerInput(Unit) {
@@ -645,12 +633,12 @@ private fun SignaturePadDialog(onSave: (Signature) -> Unit, onDismiss: () -> Uni
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { strokes.clear() }, enabled = strokes.isNotEmpty()) { Text("Clear") }
+                    TextButton(onClick = { strokes.clear() }, enabled = strokes.isNotEmpty()) { Text(stringResource(R.string.action_clear)) }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
                     Spacer(Modifier.width(4.dp))
                     TextButton(onClick = { onSave(normalize(strokes, strokePx)) }, enabled = strokes.isNotEmpty()) {
-                        Text("Use")
+                        Text(stringResource(R.string.action_use))
                     }
                 }
             }

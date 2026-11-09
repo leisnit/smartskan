@@ -1,5 +1,7 @@
 package com.example.smartskan.ui
 
+import androidx.compose.ui.res.stringResource
+import com.example.smartskan.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +74,7 @@ import com.example.smartskan.data.Expense
 import com.example.smartskan.data.Repository
 import com.example.smartskan.util.Ocr
 import com.example.smartskan.util.ReceiptParser
+import com.example.smartskan.util.deviceRegion
 import com.example.smartskan.util.formatDate
 import com.example.smartskan.util.formatMoney
 import com.example.smartskan.util.localToUtcDate
@@ -89,7 +92,7 @@ private data class ProductSummary(val barcode: String, val entries: List<Expense
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SpendingScreen(repo: Repository) {
+fun SpendingScreen(repo: Repository, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val expenses by repo.expenses.items.collectAsState()
@@ -110,18 +113,18 @@ fun SpendingScreen(repo: Repository) {
         busy = true
         scope.launch {
             try {
-                val parsed = ReceiptParser.parse(Ocr.readRows(context, uri))
+                val parsed = ReceiptParser.parse(Ocr.readRows(context, uri), monthFirst = deviceRegion() == "US")
                 openNew(
                     Expense(
-                        title = parsed.merchant ?: "Receipt",
+                        title = parsed.merchant ?: context.getString(R.string.receipt_default),
                         amountCents = parsed.totalCents ?: 0,
                         date = parsed.dateMillis ?: System.currentTimeMillis(),
                         source = Expense.SOURCE_RECEIPT,
                     )
                 )
-                if (parsed.totalCents == null) toast(context, "Couldn't find the total, please enter it")
+                if (parsed.totalCents == null) toast(context, context.getString(R.string.total_not_found))
             } catch (e: Exception) {
-                toast(context, "Couldn't read receipt: ${e.localizedMessage}")
+                toast(context, context.getString(R.string.read_receipt_failed, e.localizedMessage))
             } finally {
                 busy = false
             }
@@ -150,20 +153,21 @@ fun SpendingScreen(repo: Repository) {
     }
 
     ScreenScaffold(
-        title = "Spending",
+        title = stringResource(R.string.tool_spending),
+        onBack = onBack,
         floatingActionButton = {
             Box {
                 ExtendedFloatingActionButton(
                     onClick = { menuOpen = true },
                     icon = { Icon(Icons.Filled.Add, null) },
-                    text = { Text("Add") },
+                    text = { Text(stringResource(R.string.action_add)) },
                 )
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("Scan receipt") }, leadingIcon = { Icon(Icons.Outlined.Receipt, null) },
+                    DropdownMenuItem(text = { Text(stringResource(R.string.scan_receipt)) }, leadingIcon = { Icon(Icons.Outlined.Receipt, null) },
                         onClick = { menuOpen = false; scanReceipt() })
-                    DropdownMenuItem(text = { Text("Scan product barcode") }, leadingIcon = { Icon(Icons.Outlined.QrCodeScanner, null) },
+                    DropdownMenuItem(text = { Text(stringResource(R.string.scan_product)) }, leadingIcon = { Icon(Icons.Outlined.QrCodeScanner, null) },
                         onClick = { menuOpen = false; scanProduct() })
-                    DropdownMenuItem(text = { Text("Add manually") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                    DropdownMenuItem(text = { Text(stringResource(R.string.add_manually)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                         onClick = { menuOpen = false; openNew(Expense(title = "", amountCents = 0)) })
                 }
             }
@@ -171,15 +175,15 @@ fun SpendingScreen(repo: Repository) {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             PrimaryTabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Expenses") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Products") })
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.tab_expenses)) })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.tab_products)) })
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             val listPad = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = padding.calculateBottomPadding() + 96.dp)
             when (tab) {
                 0 -> if (expenses.isEmpty()) {
-                    EmptyState(Icons.Outlined.Receipt, "Track your spending",
-                        "Tap Add to scan a receipt (the shop, total and date are filled in for you), scan a product barcode, or add an expense by hand.")
+                    EmptyState(Icons.Outlined.Receipt, stringResource(R.string.spending_empty_title),
+                        stringResource(R.string.spending_empty_body))
                 } else {
                     LazyColumn(contentPadding = listPad, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         item { SummaryCard(expenses) }
@@ -189,8 +193,8 @@ fun SpendingScreen(repo: Repository) {
                     }
                 }
                 else -> if (products.isEmpty()) {
-                    EmptyState(Icons.Outlined.LocalOffer, "Track product prices",
-                        "Scan a product's barcode and enter its price. Scan it again next time you buy it to see how the price changes.")
+                    EmptyState(Icons.Outlined.LocalOffer, stringResource(R.string.products_empty_title),
+                        stringResource(R.string.products_empty_body))
                 } else {
                     LazyColumn(contentPadding = listPad, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(products, key = { it.barcode }) { p ->
@@ -219,16 +223,14 @@ fun SpendingScreen(repo: Repository) {
 
     viewingProduct?.let { code ->
         val product = products.firstOrNull { it.barcode == code }
-        if (product == null) {
-            viewingProduct = null
-        } else {
+        if (product != null) {
             AlertDialog(
                 onDismissRequest = { viewingProduct = null },
                 title = { Text(product.latest.title) },
                 text = {
                     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Barcode $code", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Lowest ${formatMoney(product.min)} · Highest ${formatMoney(product.max)}", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.barcode_value, code), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.price_range, formatMoney(product.min), formatMoney(product.max)), style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(8.dp))
                         product.entries.forEach { e ->
                             Row(
@@ -247,9 +249,9 @@ fun SpendingScreen(repo: Repository) {
                         val last = product.latest
                         openNew(Expense(title = last.title, amountCents = last.amountCents, category = last.category,
                             barcode = code, source = Expense.SOURCE_PRODUCT))
-                    }) { Text("Add new price") }
+                    }) { Text(stringResource(R.string.add_new_price)) }
                 },
-                dismissButton = { TextButton(onClick = { viewingProduct = null }) { Text("Close") } },
+                dismissButton = { TextButton(onClick = { viewingProduct = null }) { Text(stringResource(R.string.action_close)) } },
             )
         }
     }
@@ -271,17 +273,17 @@ private fun SummaryCard(expenses: List<Expense>) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("This month", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.this_month), style = MaterialTheme.typography.labelLarge)
             Text(formatMoney(total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "${thisMonth.size} expense${if (thisMonth.size == 1) "" else "s"} · last month ${formatMoney(lastTotal)}",
+                stringResource(R.string.month_summary, thisMonth.size, formatMoney(lastTotal)),
                 style = MaterialTheme.typography.bodySmall,
             )
             if (byCategory.isNotEmpty() && total > 0) {
                 Spacer(Modifier.height(12.dp))
                 byCategory.take(4).forEach { (category, amount) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(category, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(Categories.label(category)), style = MaterialTheme.typography.bodyMedium)
                         Text(formatMoney(amount), style = MaterialTheme.typography.bodyMedium)
                     }
                     LinearProgressIndicator(
@@ -307,7 +309,7 @@ private fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(expense.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${expense.category} · ${formatDate(expense.date)}", style = MaterialTheme.typography.bodySmall,
+                Text("${stringResource(Categories.label(expense.category))} · ${formatDate(expense.date)}", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(formatMoney(expense.amountCents), style = MaterialTheme.typography.titleMedium)
@@ -324,7 +326,7 @@ private fun ProductRow(product: ProductSummary, onClick: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(product.latest.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "Bought ${product.entries.size}× · ${formatMoney(product.min)}–${formatMoney(product.max)}",
+                    stringResource(R.string.bought_summary, product.entries.size, formatMoney(product.min), formatMoney(product.max)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -368,20 +370,20 @@ private fun ExpenseDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "New expense" else "Edit expense") },
+        title = { Text(stringResource(if (isNew) R.string.new_expense else R.string.edit_expense)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text(if (initial.barcode != null) "Product name" else "Shop / description") },
+                    label = { Text(stringResource(if (initial.barcode != null) R.string.product_name else R.string.shop_description)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = { Text("Amount") },
+                    label = { Text(stringResource(R.string.amount)) },
                     singleLine = true,
                     isError = amountText.isNotEmpty() && cents == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -389,7 +391,7 @@ private fun ExpenseDialog(
                 )
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Categories.all.forEach { c ->
-                        FilterChip(selected = c == category, onClick = { category = c }, label = { Text(c) })
+                        FilterChip(selected = c == category, onClick = { category = c }, label = { Text(stringResource(Categories.label(c))) })
                     }
                 }
                 OutlinedButton(onClick = { showDatePicker = true }) {
@@ -398,10 +400,10 @@ private fun ExpenseDialog(
                     Text(formatDate(date))
                 }
                 initial.barcode?.let {
-                    Text("Barcode $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.barcode_value, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (history.isNotEmpty()) {
-                    Text("Previous prices", style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.previous_prices), style = MaterialTheme.typography.labelLarge)
                     history.take(5).forEach { h ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(formatDate(h.date), style = MaterialTheme.typography.bodyMedium)
@@ -414,14 +416,14 @@ private fun ExpenseDialog(
         confirmButton = {
             TextButton(enabled = valid, onClick = {
                 onSave(initial.copy(title = title.trim(), amountCents = cents ?: 0, category = category, date = date))
-            }) { Text("Save") }
+            }) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
             Row {
                 if (!isNew) {
-                    TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
             }
         },
     )
@@ -434,9 +436,9 @@ private fun ExpenseDialog(
                 TextButton(onClick = {
                     state.selectedDateMillis?.let { date = utcDateToLocalNoon(it) }
                     showDatePicker = false
-                }) { Text("OK") }
+                }) { Text(stringResource(R.string.action_ok)) }
             },
-            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text(stringResource(R.string.action_cancel)) } },
         ) {
             DatePicker(state)
         }

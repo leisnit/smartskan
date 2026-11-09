@@ -1,5 +1,7 @@
 package com.example.smartskan.data
 
+import androidx.annotation.StringRes
+import com.example.smartskan.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -9,9 +11,12 @@ data class ScannedDoc(
     val name: String,
     val pageCount: Int,
     val createdAt: Long,
+    /** Booklets open in the in-app flip-through reader instead of an external PDF app. */
+    val isBooklet: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("pageCount", pageCount).put("createdAt", createdAt)
+        .put("isBooklet", isBooklet)
 
     companion object {
         fun fromJson(o: JSONObject) = ScannedDoc(
@@ -19,6 +24,7 @@ data class ScannedDoc(
             name = o.getString("name"),
             pageCount = o.optInt("pageCount", 1),
             createdAt = o.getLong("createdAt"),
+            isBooklet = o.optBoolean("isBooklet", false),
         )
     }
 }
@@ -98,8 +104,21 @@ class Signature(val strokes: List<FloatArray>, val aspect: Float, val strokeWidt
     }
 }
 
+/** Expense categories. These English names are what gets saved, so don't change them; [label] is what's shown. */
 object Categories {
     const val GROCERIES = "Groceries"
     const val OTHER = "Other"
     val all = listOf(GROCERIES, "Dining", "Transport", "Shopping", "Bills", "Health", "Entertainment", OTHER)
+
+    @StringRes
+    fun label(category: String): Int = when (category) {
+        GROCERIES -> R.string.cat_groceries
+        "Dining" -> R.string.cat_dining
+        "Transport" -> R.string.cat_transport
+        "Shopping" -> R.string.cat_shopping
+        "Bills" -> R.string.cat_bills
+        "Health" -> R.string.cat_health
+        "Entertainment" -> R.string.cat_entertainment
+        else -> R.string.cat_other
+    }
 }

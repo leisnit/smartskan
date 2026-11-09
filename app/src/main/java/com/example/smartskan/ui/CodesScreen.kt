@@ -1,6 +1,9 @@
 package com.example.smartskan.ui
 
+import androidx.compose.ui.res.stringResource
+import com.example.smartskan.R
 import android.app.SearchManager
+import androidx.annotation.StringRes
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
@@ -44,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,7 +66,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import java.util.UUID
 
 @Composable
-fun CodesScreen(repo: Repository) {
+fun CodesScreen(repo: Repository, onBack: () -> Unit, scanOnOpen: Boolean, onScanOpened: () -> Unit) {
     val context = LocalContext.current
     val codes by repo.codes.items.collectAsState()
     var selected by remember { mutableStateOf<ScannedCode?>(null) }
@@ -85,22 +89,31 @@ fun CodesScreen(repo: Repository) {
         }
     }
 
+    // Opened from the Home "Scan QR Code" shortcut: go straight to the scanner, once.
+    LaunchedEffect(scanOnOpen) {
+        if (scanOnOpen) {
+            onScanOpened()
+            scan()
+        }
+    }
+
     ScreenScaffold(
-        title = "QR & barcodes",
+        title = stringResource(R.string.tool_codes),
+        onBack = onBack,
         actions = {
             if (codes.isNotEmpty()) {
-                IconButton(onClick = { confirmClear = true }) { Icon(Icons.Outlined.DeleteSweep, "Clear history") }
+                IconButton(onClick = { confirmClear = true }) { Icon(Icons.Outlined.DeleteSweep, stringResource(R.string.clear_history_desc)) }
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = scan, icon = { Icon(Icons.Outlined.QrCodeScanner, null) }, text = { Text("Scan") })
+            ExtendedFloatingActionButton(onClick = scan, icon = { Icon(Icons.Outlined.QrCodeScanner, null) }, text = { Text(stringResource(R.string.action_scan)) })
         },
     ) { padding ->
         if (codes.isEmpty()) {
             EmptyState(
                 Icons.Outlined.QrCode2,
-                "No scans yet",
-                "Scan any QR code or barcode: links, Wi-Fi, contacts, products and more. Every scan is saved here.",
+                stringResource(R.string.no_scans),
+                stringResource(R.string.no_scans_body),
                 Modifier.padding(padding),
             )
         } else {
@@ -113,13 +126,13 @@ fun CodesScreen(repo: Repository) {
                             Column(Modifier.weight(1f)) {
                                 Text(code.value, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${code.type} · ${code.format} · ${formatDateTime(code.createdAt)}",
+                                    "${typeLabel(code.type)} · ${formatLabel(code.format)} · ${formatDateTime(code.createdAt)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             IconButton(onClick = { copyToClipboard(context, code.value) }) {
-                                Icon(Icons.Outlined.ContentCopy, "Copy")
+                                Icon(Icons.Outlined.ContentCopy, stringResource(R.string.action_copy))
                             }
                         }
                     }
@@ -132,7 +145,7 @@ fun CodesScreen(repo: Repository) {
         CodeDialog(code, onDelete = { repo.deleteCode(code.id); selected = null }, onDismiss = { selected = null })
     }
     if (confirmClear) {
-        ConfirmDialog("Clear history?", "All ${codes.size} saved scans will be deleted.", "Clear",
+        ConfirmDialog(stringResource(R.string.clear_history_title), stringResource(R.string.clear_history_body, codes.size), stringResource(R.string.action_clear),
             { repo.clearCodes() }, { confirmClear = false })
     }
 }
@@ -144,54 +157,55 @@ private fun CodeDialog(code: ScannedCode, onDelete: () -> Unit, onDismiss: () ->
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(iconFor(code.type), null) },
-        title = { Text(code.type) },
+        title = { Text(typeLabel(code.type)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SelectionContainer(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
                     Text(code.value, style = MaterialTheme.typography.bodyLarge)
                 }
                 Text(
-                    "${code.format} · ${formatDateTime(code.createdAt)}",
+                    "${formatLabel(code.format)} · ${formatDateTime(code.createdAt)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     action?.let { (label, intent) ->
                         AssistChip(
-                            onClick = { startSafely(context, intent, "No app can handle this") },
-                            label = { Text(label) },
+                            onClick = { startSafely(context, intent, context.getString(R.string.no_app_handle)) },
+                            label = { Text(stringResource(label)) },
                             leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, null) },
                         )
                     }
-                    AssistChip(onClick = { copyToClipboard(context, code.value) }, label = { Text("Copy") },
+                    AssistChip(onClick = { copyToClipboard(context, code.value) }, label = { Text(stringResource(R.string.action_copy)) },
                         leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) })
-                    AssistChip(onClick = { shareText(context, code.value) }, label = { Text("Share") },
+                    AssistChip(onClick = { shareText(context, code.value) }, label = { Text(stringResource(R.string.action_share)) },
                         leadingIcon = { Icon(Icons.Outlined.Share, null) })
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
         dismissButton = {
-            TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
         },
     )
 }
 
 /** The most useful thing to do with a code, e.g. open a link or search a product number. */
-private fun primaryAction(code: ScannedCode): Pair<String, Intent>? {
+private fun primaryAction(code: ScannedCode): Pair<Int, Intent>? {
     val v = code.value.trim()
     return when (code.type) {
-        TYPE_URL -> "Open" to Intent(Intent.ACTION_VIEW, Uri.parse(if ("://" in v) v else "https://$v"))
-        TYPE_PHONE -> "Call" to Intent(Intent.ACTION_DIAL, Uri.parse(if (v.startsWith("tel:", true)) v else "tel:$v"))
+        TYPE_URL -> R.string.action_open to Intent(Intent.ACTION_VIEW, Uri.parse(if ("://" in v) v else "https://$v"))
+        TYPE_PHONE -> R.string.code_call to Intent(Intent.ACTION_DIAL, Uri.parse(if (v.startsWith("tel:", true)) v else "tel:$v"))
         TYPE_EMAIL -> if (v.contains("@") && !v.startsWith("MATMSG", true)) {
-            "Email" to Intent(Intent.ACTION_SENDTO, Uri.parse(if (v.startsWith("mailto:", true)) v else "mailto:$v"))
+            R.string.code_email to Intent(Intent.ACTION_SENDTO, Uri.parse(if (v.startsWith("mailto:", true)) v else "mailto:$v"))
         } else null
-        TYPE_GEO -> "Map" to Intent(Intent.ACTION_VIEW, Uri.parse(v))
+        TYPE_GEO -> R.string.code_map to Intent(Intent.ACTION_VIEW, Uri.parse(v))
         TYPE_WIFI, TYPE_CONTACT, TYPE_EVENT, TYPE_SMS -> null
-        else -> "Search" to Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, v)
+        else -> R.string.code_search to Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, v)
     }
 }
 
+// These English names are what gets saved with each scan, so don't change them; typeLabel() is what's shown.
 private const val TYPE_URL = "Link"
 private const val TYPE_WIFI = "Wi-Fi"
 private const val TYPE_CONTACT = "Contact"
@@ -202,6 +216,36 @@ private const val TYPE_GEO = "Location"
 private const val TYPE_EVENT = "Event"
 private const val TYPE_PRODUCT = "Product"
 private const val TYPE_ISBN = "Book (ISBN)"
+private const val TYPE_ID_CARD = "ID card"
+private const val TYPE_TEXT = "Text"
+private const val FORMAT_QR = "QR Code"
+private const val FORMAT_BARCODE = "Barcode"
+
+@Composable
+private fun typeLabel(type: String): String {
+    @StringRes val label = when (type) {
+        TYPE_URL -> R.string.type_link
+        TYPE_CONTACT -> R.string.type_contact
+        TYPE_EMAIL -> R.string.type_email
+        TYPE_PHONE -> R.string.type_phone
+        TYPE_GEO -> R.string.type_location
+        TYPE_EVENT -> R.string.type_event
+        TYPE_PRODUCT -> R.string.type_product
+        TYPE_ISBN -> R.string.type_isbn
+        TYPE_ID_CARD -> R.string.label_id_card
+        TYPE_TEXT -> R.string.type_text
+        else -> return type // Wi-Fi and SMS read the same everywhere.
+    }
+    return stringResource(label)
+}
+
+/** Format names such as "EAN-13" are the same in every language. */
+@Composable
+private fun formatLabel(format: String): String = when (format) {
+    FORMAT_QR -> stringResource(R.string.format_qr)
+    FORMAT_BARCODE -> stringResource(R.string.format_barcode)
+    else -> format
+}
 
 private fun typeName(valueType: Int): String = when (valueType) {
     Barcode.TYPE_URL -> TYPE_URL
@@ -214,12 +258,12 @@ private fun typeName(valueType: Int): String = when (valueType) {
     Barcode.TYPE_CALENDAR_EVENT -> TYPE_EVENT
     Barcode.TYPE_PRODUCT -> TYPE_PRODUCT
     Barcode.TYPE_ISBN -> TYPE_ISBN
-    Barcode.TYPE_DRIVER_LICENSE -> "ID card"
-    else -> "Text"
+    Barcode.TYPE_DRIVER_LICENSE -> TYPE_ID_CARD
+    else -> TYPE_TEXT
 }
 
 private fun formatName(format: Int): String = when (format) {
-    Barcode.FORMAT_QR_CODE -> "QR Code"
+    Barcode.FORMAT_QR_CODE -> FORMAT_QR
     Barcode.FORMAT_AZTEC -> "Aztec"
     Barcode.FORMAT_CODABAR -> "Codabar"
     Barcode.FORMAT_CODE_39 -> "Code 39"
@@ -232,7 +276,7 @@ private fun formatName(format: Int): String = when (format) {
     Barcode.FORMAT_PDF417 -> "PDF417"
     Barcode.FORMAT_UPC_A -> "UPC-A"
     Barcode.FORMAT_UPC_E -> "UPC-E"
-    else -> "Barcode"
+    else -> FORMAT_BARCODE
 }
 
 private fun iconFor(type: String): ImageVector = when (type) {
