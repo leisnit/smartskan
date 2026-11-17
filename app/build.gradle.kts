@@ -10,27 +10,32 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.smartskan.app"
+        applicationId = "com.smartskan.aab"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
+        versionCode = 7
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // AdMob IDs. These are Google's public TEST IDs — replace both with your own from the
-        // AdMob console before releasing, or you won't be paid for ads.
-        manifestPlaceholders["admobAppId"] = "ca-app-pub-3940256099942544~3347511713"
-        buildConfigField("String", "BANNER_AD_UNIT_ID", "\"ca-app-pub-3940256099942544/9214589741\"")
+        // Live AdMob IDs from the AdMob console.
+        manifestPlaceholders["admobAppId"] = "ca-app-pub-9788753435817251~9995541876"
+        buildConfigField("String", "BANNER_AD_UNIT_ID", "\"ca-app-pub-9788753435817251/6695250250\"")
     }
 
     buildTypes {
         release {
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                packageScope = setOf("com.smartskan.**")
             }
             proguardFiles("proguard-rules.pro")
+            // Puts native debug symbols in the bundle (from library .so files such as ML Kit's),
+            // so Play Console can show readable native crash and ANR stack traces.
+            // Needs the NDK installed (SDK Manager → SDK Tools → NDK (Side by side)).
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
     }
     compileOptions {
